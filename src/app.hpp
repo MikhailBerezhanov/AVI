@@ -93,11 +93,8 @@ public:
 
 	void init(bool conf_trace = false);
 	void deinit();
-	// void reinit();
-	void create_sys_event(const std::string &ev_name, const std::string &ev_data = "") const;
 
-	
-	// StartupScheduler startup_scheduler{this};
+	void create_sys_event(const std::string &ev_name, const std::string &ev_data = "") const;
 
 	Settings settings;				// Настройки приложения
 	Directories dirs;				// Рабочие директории
@@ -123,7 +120,6 @@ private:
 	void regular_mode();		// Штатный режим работы
 	void wait_for_data(const std::string &data_type);
 
-	// RouteSelection route_selection_task{ [this](){ data_check(); } };
 	void wait_for_route_selection();
 };
 
