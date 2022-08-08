@@ -1,0 +1,29 @@
+#! /bin/sh
+
+set -e
+
+case "$1" in
+start)
+    echo -n "Starting autostart script: "
+     	  if [ -x /data/autoinformer/autostart.sh ]
+	  then
+	  start-stop-daemon -S -b -a /data/autoinformer/autostart.sh
+	  fi
+    echo "done"
+    ;;
+  stop)
+    echo -n "Stopping autoinformer daemon: "
+     start-stop-daemon -K -n autostart.sh
+    echo "done"
+    ;;
+  restart)
+    $0 stop
+    $0 start
+    ;;
+  *)
+    echo "Usage autostart { start | stop | restart }" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

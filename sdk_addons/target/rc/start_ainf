@@ -1,0 +1,29 @@
+#! /bin/sh
+
+set -e
+
+case "$1" in
+start)
+    echo -n "Starting autoinformer daemon: "
+     	  if [ -x /data/autoinformer/ainf.out ]
+	  then
+	  start-stop-daemon -S -b -a /data/autoinformer/ainf.out
+	  fi
+    echo "done"
+    ;;
+  stop)
+    echo -n "Stopping autoinformer daemon: "
+     start-stop-daemon -K -n ainf.out
+    echo "done"
+    ;;
+  restart)
+    $0 stop
+    $0 start
+    ;;
+  *)
+    echo "Usage autoinformer { start | stop | restart }" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

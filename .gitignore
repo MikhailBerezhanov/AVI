@@ -1,0 +1,7 @@
+output/
+obj/
+tests/
+*.out
+*.o
+*.test
+external/

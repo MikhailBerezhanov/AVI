@@ -1,0 +1,3 @@
+[submodule "src/lc_client"]
+	path = src/lc_client
+	url = git@github.com:MikhailBerezhanov/LC_client.git
