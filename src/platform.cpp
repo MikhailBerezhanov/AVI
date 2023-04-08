@@ -35,6 +35,8 @@ namespace platform
 
 // ------------- COMMON PART -------------
 
+static std::mutex lcd_mutex;
+
 // Custom Format parser:
 //
 // [ 13.07.22 12:12:39 ] vld: 1, lat: 55.750317, long: 37.770050, crs: 147.60, spd: 17.96
@@ -174,13 +176,15 @@ static GPS_data get_gps_generator_data()
 // ------------- TARGET PART -------------
 #ifndef _HOST_BUILD
 
-void init(const std::string &gps_generator_file)
+void init(int gps_poll_period_ms, const std::string &gps_generator_file)
 {
 	Hardware::enable_AT();
 	Hardware::AT->init();
 
 	if(gps_generator_file.empty()){
-		Hardware::AT->enable_GPS();
+		bool increased_rate = gps_poll_period_ms < 1000;
+		Hardware::AT->enable_GPS(increased_rate);
+		log_info("GPS is enabled with '%s' rate mode\n", increased_rate ? "100ms" : "1sec");
 	}
 	else{
 		init_gps_generator(gps_generator_file);
@@ -189,6 +193,7 @@ void init(const std::string &gps_generator_file)
 	Hardware::enable_audio();
 	Hardware::audio->set_audio_gain_level(3);
 
+	Hardware::enable_leds();
 	Hardware::enable_buttons();
 
 	Hardware::enable_lcd();
@@ -229,6 +234,10 @@ std::string get_IMEI()
 
 GPS_data get_GPS_data()
 {
+	static bool was_valid = false;
+	// счетчик невалдиных данных (для защиты от дребезга моргания светодиодом)
+	static uint8_t valid_cnt = 3;	
+
 	try{
 
 		if(gps_nmea_gen || gps_track_gen){
@@ -238,8 +247,27 @@ GPS_data get_GPS_data()
 		hw::GPSinfo data = Hardware::AT->get_GPSinfo();
 
 		if(data.is_valid()){
+
+			if( !was_valid ){
+				// Включаем светодиод - индикацию наличия валидных GPS данных
+				platform::set_LED(true);
+				was_valid = true;
+			}
+
+			valid_cnt = 3;
+
 			std::pair<double, double> lat_lon = data.get_decimal_coordinates();
 			return GPS_data(data.get_utc_time(), lat_lon, data.get_speed(), data.get_course(), true);
+		}
+		else{
+			--valid_cnt;
+
+			if( !valid_cnt ){
+				// Отключаем светодиод
+				platform::set_LED(false);
+			}
+
+			was_valid = false;
 		}
 	}
 	catch(const std::exception &e){
@@ -247,6 +275,12 @@ GPS_data get_GPS_data()
 	}
 
 	return GPS_data();
+}
+
+void set_LED(bool enable)
+{
+	// Управление светодиодом HL2
+	Hardware::leds[1].set_value(enable);
 }
 
 void audio_play(const std::string &mp3_path)
@@ -264,6 +298,26 @@ void audio_setup_stop_callback(std::function<void(void)> func)
 	Hardware::audio->finished_callback = func;
 }
 
+void audio_set_gain_level(int level)
+{
+	Hardware::audio->set_audio_gain_level(level);
+	log_info("Audio gain is set to: %d\n", level);
+}
+
+int audio_get_gain_level()
+{
+	int res = 0;
+
+	try{
+		res = Hardware::audio->get_audio_gain_level();
+	}
+	catch(const std::exception &e){
+		log_excp("%s\n", e.what());
+	}
+
+	return res;
+}
+
 void audio_stop()
 {
 	Hardware::audio->stop();
@@ -272,6 +326,7 @@ void audio_stop()
 void deinit()
 {
 	Hardware::AT->deinit();
+	platform::set_LED(false);
 }
 
 // Buttons
@@ -303,64 +358,75 @@ void set_buttons_long_press_threshold(double sec)
 // LCD methods
 void lcd_backlight(bool on_off)
 {
-	std::tuple<bool, bool, bool> curr_ctrl = Hardware::lcd->get_control();
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 
+	std::tuple<bool, bool, bool> curr_ctrl = Hardware::lcd->get_control();
 	Hardware::lcd->control(on_off, std::get<1>(curr_ctrl), std::get<2>(curr_ctrl));
 }
 
 bool lcd_get_backlight_state()
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	return Hardware::lcd->get_backlight_state();
 }
 
 void lcd_print(const std::string &str, LCD1602::Alignment align)
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	Hardware::lcd->print(str, align);
 }
 
 void lcd_print(char ch)
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	Hardware::lcd->print_char(ch);
 }
 
 void lcd_print_with_padding(const std::string &str, char symb)
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	Hardware::lcd->print_with_padding(str, symb);
 }
 
 uint8_t lcd_get_num_rows()
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	return Hardware::lcd->get_num_rows();
 }
 
 uint8_t lcd_get_num_cols()
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	return Hardware::lcd->get_num_cols();
 }
 
 void lcd_set_cursor(uint8_t row, uint8_t col)
 {
-	// printf("set cursor to: %u, %u\n", row, col);
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	Hardware::lcd->set_cursor(row, col);
 }
 
 void lcd_clear()
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	Hardware::lcd->clear();
 }
 
 void lcd_home()
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	Hardware::lcd->return_home();
 }
 
 void lcd_add_custom_char(uint8_t location, const uint8_t *charmap)
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	Hardware::lcd->user_char_create(location, charmap);
 }
 
 void lcd_print_custom_char(uint8_t location)
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	Hardware::lcd->user_char_print(location);
 }
 
@@ -458,6 +524,13 @@ public:
 		cv_play_.notify_one();
 	}
 
+	void set_gain_level(int lvl) 
+	{ 
+		gain_level_ = lvl;
+		log_msg(MSG_VERBOSE, "AudioSimulator::set_gain_level to %d\n", gain_level_); 
+	}
+	int get_gain_level() { return gain_level_;}
+
 	void stop()
 	{
 		stopped_.store(true);
@@ -471,6 +544,7 @@ private:
 	std::atomic<bool> is_playing_{false};
 	std::atomic<bool> stopped_{false};
 	stop_callback stop_cb_ = nullptr;
+	int gain_level_ = 0;
 };
 
 
@@ -509,12 +583,12 @@ public:
 		this->screen = newterm(nullptr, this->term_fp, this->term_fp);
 
 		// wait terminal shows it's input to clear it
-		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
 		raw(); 			// disable line buffering (CTRL-Z, CTRL-C are directly passed to the program without generating a signal)
 		// nonl();
 		noecho();		// switches off echoing
-		// cbreak();		// disable line buffering (CTRL-Z, CTRL-C works as signals)
+		cbreak();		// disable line buffering (CTRL-Z, CTRL-C works as signals)
 		clear();		// clear the screen
 		curs_set(0);	// hide cursor
 		start_color();	// enable color
@@ -532,7 +606,7 @@ public:
 		mvprintw(7, 29, "f");
 		attroff(A_BOLD);
 
-		const char *prompt = "ALT+KEY = long press";
+		const char *prompt = "ALT+f = long press";
 		int len = screen_width - strlen(prompt);
 		int prompt_start_x =  len >= 0 ? len / 2 : 0;
 		mvprintw(9, prompt_start_x, prompt);
@@ -550,6 +624,23 @@ public:
 
 	int get_rows_num() const { return window_rows; }
 	int get_cols_num() const { return window_cols; }
+
+	void set_backlight(bool on_off)
+	{
+		this->backlight = on_off;
+
+		if( !on_off ){
+			// werase(this->window);
+			wbkgd(this->window, COLOR_PAIR(0));
+			wrefresh(this->window);
+		}
+		else{
+			wbkgd(this->window, COLOR_PAIR(1));
+			wrefresh(this->window);
+		}
+	}
+
+	bool get_backlight() const { return this->backlight; }
 
 	void print(const std::string &str)
 	{
@@ -621,6 +712,8 @@ private:
 		'v',	// 2 - down_arrow
 	};
 
+	bool backlight = false;
+
 	std::thread thandle_;
 	std::string term_num;
 	FILE *term_fp = nullptr;
@@ -661,12 +754,10 @@ private:
 	void open_new_terminal()
 	{
 		utils::exec("gnome-terminal --geometry=" + std::to_string(screen_width) + "x" + std::to_string(screen_height));
-		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
 		std::string num = utils::exec_piped("ls /dev/pts/ | tail -2 | head -1 | tr -d '\n'");
 		this->term_num = "pts/" + num;
-
-		// printf("terminal opened: %s\n", term_num.c_str());
 	}
 
 	WINDOW* create_window(int height, int width, int starty, int startx)
@@ -768,7 +859,7 @@ private:
 static AudioSimulator audio_sim;
 static InterfaceSimulator iface_sim;
 
-void init(const std::string &gps_generator_file)
+void init(int gps_poll_period_ms, const std::string &gps_generator_file)
 {
 	if( !gps_generator_file.empty() ){
 		init_gps_generator(gps_generator_file);
@@ -798,6 +889,11 @@ GPS_data get_GPS_data()
 	return GPS_data("", {0.123456, 9.876543}, 0.1, 0.0, false);
 }
 
+void set_LED(bool enable)
+{
+	log_msg(MSG_VERBOSE, _YELLOW "LED %s" _RESET "\n", enable ? "On" : "Off"); 
+}
+
 void audio_play(const std::string &mp3)
 {
 	audio_sim.play(mp3);
@@ -811,6 +907,16 @@ bool audio_is_playing()
 void audio_setup_stop_callback(std::function<void(void)> func)
 {
 	audio_sim.set_stop_callback(func);
+}
+
+void audio_set_gain_level(int value)
+{
+	audio_sim.set_gain_level(value);
+}
+
+int audio_get_gain_level()
+{
+	return audio_sim.get_gain_level();
 }
 
 void audio_stop()
@@ -830,57 +936,83 @@ void set_button_long_press_threshold(button_t id, double sec){}
 void set_buttons_long_press_threshold(double sec){}
 
 // LCD methods
-void lcd_backlight(bool on_off) {}
-bool lcd_get_backlight_state() { return true; }
+void lcd_backlight(bool on_off)
+{
+	std::lock_guard<std::mutex> lck(lcd_mutex);
+	iface_sim.set_backlight(on_off);
+}
+
+bool lcd_get_backlight_state()
+{ 
+	std::lock_guard<std::mutex> lck(lcd_mutex);
+	return iface_sim.get_backlight(); 
+}
 
 void lcd_print(const std::string &str, LCD1602::Alignment align)
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	iface_sim.print(str);
-	// log_msg(MSG_DEBUG, _BLUE "%s" _RESET "\n", str);
 }
 
-void lcd_print(char ch){
+void lcd_print(char ch)
+{
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	iface_sim.print(ch);
 }
 
 void lcd_print_with_padding(const std::string &str, char symb) 
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	iface_sim.print_with_padding(str, symb);
 }
 
 uint8_t lcd_get_num_rows()
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	return iface_sim.get_rows_num();
 }
 
 uint8_t lcd_get_num_cols()
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	return iface_sim.get_cols_num();
 }
 
 void lcd_set_cursor(uint8_t row, uint8_t col)
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	iface_sim.move_cursor(row, col);
 }
 
 void lcd_clear()
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	iface_sim.clear();
 }
 
 void lcd_home()
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	iface_sim.home_cursor();
 }
 
-void lcd_add_custom_char(uint8_t location, const uint8_t *charmap){}
+void lcd_add_custom_char(uint8_t location, const uint8_t *charmap)
+{
+	std::lock_guard<std::mutex> lck(lcd_mutex);
+	// dummy
+}
+
 void lcd_print_custom_char(uint8_t location)
 {
+	std::lock_guard<std::mutex> lck(lcd_mutex);
 	iface_sim.print_custom_char(location);
 }
 
 
-void deinit(){}
+void deinit()
+{
+	platform::set_LED(false);
+}
 
 #endif // #ifndef _HOST_BUILD
 

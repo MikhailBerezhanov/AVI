@@ -7,17 +7,15 @@
 
 #include "utils/fs.hpp"
 #include "utils/crypto.hpp"
-// #include "lc_protocol.hpp"
+#include "utils/datetime.hpp"
 #include "app_db.hpp"
 #include "app.hpp"
 #include "app_lc.hpp"
 
-namespace avi{
+// TMP
+#include "lc_trans.hpp"
 
-// Инициализация статических членов класса
-// LC_client::settings LC_client_task::sets;
-// LC_client::directories LC_client_task::dirs;
-// LC_client LC_client_task::lcc{&LC_client_task::dirs, &LC_client_task::sets};
+namespace avi{
 
 // Сопоставление типов файлов протокола приложения и протокола локального центра
 const std::unordered_map<std::string, const std::string> LC_client_task::types_map = {
@@ -26,17 +24,20 @@ const std::unordered_map<std::string, const std::string> LC_client_task::types_m
 bool LC_client_task::global_inited{false};
 
 // Информация об устройстве для периодической передачи на сервер ЛЦ 
-AVI_Info::AVI_Info(const std::string &version, const std::string &state): 
-	LC_base_device_info(pb::RAW) // TODO:: add type
+AVI_Status::AVI_Status(const std::string &version, const std::string &state): 
+	LC_device_status() 
 {
-	this->info.mutable_base()->set_version(version);
-	this->info.mutable_base()->set_state(state);
+	this->status.mutable_base()->set_state(state);
+	this->status.mutable_base()->set_version(version);
 }
 
-std::string AVI_Info::serialize_to_proto() const
+std::string AVI_Status::serialize_to_proto() const
 {
+	logger.msg(MSG_DEBUG, "Serializing avi status:\n%s\n", lc::proto_msg_to_json(this->status));
+
+	std::lock_guard<std::mutex> lck(this->mtx);
 	std::string out;
-	this->info.SerializeToString(&out);
+	this->status.SerializeToString(&out);
 	return out;
 }
 
@@ -56,7 +57,7 @@ void LC_client_task::global_cleanup()
 	}
 }
 
-//
+// Инициализация клиента
 void LC_client_task::init()
 {
 	if( !this->app ){
@@ -80,10 +81,12 @@ void LC_client_task::init()
 	// Назначаем колбеки на сохранение файлов и их локальные версии 
 	this->setup_download_callbacks();
 	sets.get["device_tgz"].curr_ver = NSIDatabase::get_version();
+	this->avi_status.set_nsi(sets.get.at("device_tgz").curr_ver, this->app->mdb.f_data.get_fdate(APP_FILE_NSI));
 
 	std::lock_guard<std::recursive_mutex> lock(this->lcc_mutex);
 	this->lcc.init();
 	this->lcc.rotate_sent_data();
+	this->lcc.set_device_status(&this->avi_status);	
 }
 
 void LC_client_task::deinit()
@@ -165,8 +168,6 @@ static std::pair<bool, std::string> is_in_list(const lc_media_list &list, const 
 	}
 
 	return res;
-
-	// return std::binary_search(list.cbegin(), list.cend(), elem, comp);
 }
 
 // Возвращает массив имен+версий файлов отсутствующих в local листе 
@@ -193,11 +194,11 @@ void LC_client_task::clear_unused_media(const lc_media_list &local, const lc_med
 {
 	// Проверка нужно ли что-нибудь удалить с диска
 	for(const auto &elem : local){
-		std::pair<bool, std::string> ret = is_in_list(local, elem);
+		std::pair<bool, std::string> ret = is_in_list(remote, elem);
 
 		if( !ret.first ){
 			std::string path = app->dirs.media_dir + "/" + elem.name;
-			log_msg(MSG_DEBUG | MSG_TO_FILE, "Removing media not in remote list '%s'\n", path);
+			log_info("Removing unused media (not in remote list) '%s'\n", elem.name);
 			remove(path.c_str());
 		}
 	}
@@ -232,10 +233,11 @@ std::string LC_client_task::Media_list::data_to_str(int pad) const
 	std::string out;
 
 	for(const auto &elem : data){
-		out += std::string(pad, ' ') + elem.name + " : " + elem.md5 + "\n";
+		out += "{\"name\":\"" + elem.name + "\",\"md5\":\"" + elem.md5 + "\"},\n";
 	}
 
 	if( !out.empty() ){
+		out.pop_back();
 		out.pop_back();
 	}
 
@@ -257,12 +259,11 @@ void LC_client_task::get_media(bool list_is_tmp, const lc_media_list &remote_lis
 
 		for(const auto &ver : versions){
 			this->sets.get.at("media").curr_ver = ver;
-			this->lcc.get_file("media", this->sets.get.at("media"));
-			++files_cnt;
+			files_cnt += this->lcc.get_file("media", this->sets.get.at("media"));
 		}
 
 		if(versions.empty()){
-			log_warn("%s_media_lists are equal, no update needed\n", list_is_tmp ? "tmp" : "const");
+			log_warn("All files from remote %s_media_list are found, but list versions are different\n", list_is_tmp ? "tmp" : "const");
 		}	
 		else{
 			log_info("Successfully downloaded %u %s_media file(s)\n", files_cnt, list_is_tmp ? "tmp" : "const");
@@ -279,18 +280,15 @@ void LC_client_task::get_media(bool list_is_tmp, const lc_media_list &remote_lis
 	// Возвращаем разрешение на запрос
 	this->sets.get.at("media").enabled = was_enabled;
 
-	// Если что-то было скачано
-	if(files_cnt){
-		// Обновляем соответствующий локальный медиа-лист 
-		if(list_is_tmp){
-			tmp_media_list.fill(app->dirs.media_dir);
-		}
-		else{
-			const_media_list.fill(app->dirs.media_dir, false);
-		}
-		
-		// Очищаем устаревший медиа контент
-		this->clear_unused_media(local_list->data, remote_list);
+	// Очищаем устаревший медиа контент
+	this->clear_unused_media(local_list->data, remote_list);
+
+	// Обновляем соответствующий локальный медиа-лист 
+	if(list_is_tmp){
+		tmp_media_list.fill(app->dirs.media_dir);
+	}
+	else{
+		const_media_list.fill(app->dirs.media_dir, false);
 	}
 
 	if(error_occured){
@@ -309,7 +307,11 @@ void LC_client_task::setup_download_callbacks()
 	// НСИ
 	this->sets.get["device_tgz"].dec_save = [this](const string &name, const uint8_t *content, size_t size, const string &version){ 
 		std::string db_path = this->save_as_bin(APP_FILE_NSI, app->dirs.data_dir, content, size, version); 
-		
+		std::string curr_dtime = utils::get_local_datetime();
+
+		this->app->mdb.f_data.set_fver(APP_FILE_NSI, version, curr_dtime);
+		this->avi_status.set_nsi(version, curr_dtime);
+
 		if(this->on_nsi_update){
 			this->on_nsi_update(db_path, version);
 		}
@@ -392,6 +394,29 @@ void LC_client_task::download()
 	this->lcc.get_media_lists(tmp_media_list.version, const_media_list.version);
 }
 
+// Отправка статуса устройства
+void LC_client_task::send_device_status()
+{
+	// Заполнение структуры актуальными текущими значениями
+	this->avi_status.set_state( this->app->dev_state.get() );
+	this->avi_status.set_prev_push_info("1", "23");	// TODO
+
+	// 
+	this->avi_status.set_sd_free_space(100500);
+
+	const auto pos = this->app->get_current_position();
+
+	if(pos.valid){
+		this->avi_status.set_latitude_longitude( std::to_string(pos.latitude), std::to_string(pos.longitude) );
+	}
+	else{
+		this->avi_status.set_latitude_longitude("", "");
+	}
+	
+	// Отправка с возможностью получения PUSH сообщения
+	this->lcc.put_dev_status();
+}
+
 Background_task::signal LC_client_task::main_func(void)
 {
 	// Проверка состояния задачи
@@ -444,8 +469,11 @@ Background_task::signal LC_client_task::main_func(void)
 
 		// В любом режиме отправляются транзакции системных событий 
 		// if(this->upload_period_elapsed()){
-		// 	this->lcc.put_data();
+			// this->lcc.put_data();
 		// } 
+
+		// 
+		this->send_device_status();
 	}
 	catch(const LC_no_connection &e){
 		// Если соединения было, но пропало - генерируем системное событие

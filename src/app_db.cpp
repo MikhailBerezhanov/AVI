@@ -10,6 +10,7 @@
 
 #include "utils/utility.hpp"
 #include "utils/iconvlite.hpp"
+#include "utils/fs.hpp"
 
 #define LOG_MODULE_NAME		"[ MDB ]"
 #include "logger.hpp"
@@ -508,7 +509,7 @@ void NSIDatabase::update(const std::string &path)
 	}
 }
 
-
+// Кодировка строк - UTF-8
 kRoute::routes kRoute::read()
 {
 	routes res;
@@ -529,7 +530,7 @@ kRoute::routes kRoute::read()
 			sscanf(argv[0], "%d", &id);
 		}
 		if(argv[1]){
-			data.number = utils::cp1251_to_utf8(argv[1]);
+			data.number = argv[1]; //utils::cp1251_to_utf8(argv[1]);
 		}
 		if(argv[2]){
 			sscanf(argv[2], "%d", &data.townflag);
@@ -544,10 +545,11 @@ kRoute::routes kRoute::read()
 			sscanf(argv[5], "%d", &data.code);
 		}
 		if(argv[6]){
-			data.name = utils::cp1251_to_utf8(argv[6]);
+			// log_hexdump(MSG_DEBUG, argv[6], strlen(argv[6]), "route.name");
+			data.name = argv[6]; // UTF-8   // utils::cp1251_to_utf8(argv[6]);
 		}
 		if(argv[7]){
-			data.tpscode = utils::cp1251_to_utf8(argv[7]);
+			data.tpscode = argv[7]; //utils::cp1251_to_utf8(argv[7]);
 		}
 
 		res->insert({id, data});
@@ -575,7 +577,7 @@ WHERE CAST(cfgParam as TEXT) =\"" + param_name + "\";";
 			throw std::runtime_error(excp_method("invalid row size " + std::to_string(argc) + " (expected 1)"));
 		}
 
-		*res = utils::cp1251_to_utf8(argv[0]);
+		*res = argv[0]; //utils::cp1251_to_utf8(argv[0]);
 
 		return 0;
 	};
@@ -642,10 +644,10 @@ uint8_t kFrames::Zone::course_to_bitmask(double course_degrees) noexcept
 bool kFrames::Zone::course_check(double course) const noexcept
 {
 	const uint8_t course_bitmask = course_to_bitmask(course);
-	log_msg(MSG_TRACE, "course_bitmask: 0x%02X vs course_bitmap_: 0x%02X\n", course_bitmask, course_bitmap_);
 
 	if((course_bitmap_ & course_bitmask) == 0){
 		// Такой сектор не выставлен
+		log_msg(MSG_TRACE, "course mismatch (current: 0x%02X vs bitmap: 0x%02X)\n", course_bitmask, course_bitmap_);
 		return false;
 	}
 
@@ -665,6 +667,8 @@ bool kFrames::RectangleZone::contains(const std::pair<double, double> &lat_lon, 
 	const double &lon = lat_lon.second;
 
 	if((lon < lon_end_) && (lon > lon_start_) && (lat < lat_end_) && (lat > lat_start_)){
+
+		log_msg(MSG_TRACE, "inside RectangleZone S(%lf, %lf), E(%lf, %lf)\n", lat_start_, lon_start_, lat_end_, lon_end_);
 
 		if(course >= 0.0){
 			return course_check(course);
@@ -908,14 +912,14 @@ void NSIDatabase::read()
 	show_frames();
 }
 
-std::vector<std::string> NSIDatabase::get_available_routes()
+std::vector<std::string> NSIDatabase::get_available_route_names()
 {
 	std::vector<std::string> res;
 
 	std::lock_guard<std::recursive_mutex> lck(db_file_mutex_);
 
 	for(const auto &elem : routes_){
-		res.push_back(std::to_string(elem.first));
+		res.push_back(elem.second.name);
 	}
 
 	return res;
@@ -929,6 +933,25 @@ void NSIDatabase::select_route(int route_id)
 	}
 	
 	log_msg(MSG_INFO, "Route %d selected\n", route_id);
+}
+
+void NSIDatabase::select_route(const std::string &route_name)
+{
+	int route_id = -1; 
+
+	for(const auto &elem : routes_){
+		if(elem.second.name == route_name){
+			route_id = elem.first;
+			break;
+		}
+	}
+
+	if(route_id == -1){
+		log_warn("No route_id found for name '%s'\n", route_name);
+		return;
+	}
+
+	select_route(route_id);
 }
 
 void NSIDatabase::reload_route_frames()
@@ -945,6 +968,29 @@ void NSIDatabase::reload_route_frames()
 			log_err("Could not read kFrames: %s\n", e.what());
 		}
 	}
+}
+
+bool NSIDatabase::check_media_content_presence(const std::string &media_dir)
+{
+	std::lock_guard<std::recursive_mutex> lck(db_file_mutex_);
+
+	// Check content for Main frames
+	for(const auto &frame : frames_.first){
+		if( !utils::file_exists(media_dir + "/" + frame.minfo.filename) ){
+			log_warn("main frame media '%s' not found\n", frame.minfo.filename);
+			return false;
+		}
+	}
+
+	// Check content for Child frames
+	for(const auto &elem : frames_.second){
+		if( !utils::file_exists(media_dir + "/" + elem.second.filename) ){
+			log_warn("child frame media '%s' not found\n", elem.second.filename);
+			return false;
+		}
+	}
+
+	return true;
 }
 
 // bool NSIDatabase::ready()

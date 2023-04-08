@@ -220,7 +220,7 @@ void Announcement_task::init(const std::string *media_dir)
 	mplayer_.init(&(app_->dirs.media_dir));
 }
 
-bool Announcement_task::gps_data_is_valid(const platform::GPS_data &data) noexcept
+bool Announcement_task::gps_data_ready_for_processing(const platform::GPS_data &data) noexcept
 {
 	if( !data.valid || (data.speed_kmh < app_->settings.gps_min_valid_speed) ){
 		gps_validity_counter_ = 0;
@@ -241,7 +241,8 @@ void Announcement_task::update_interface(int frame_id) const
 {
 	std::string value = (frame_id > -1) ? std::to_string(frame_id) : "XXXX";
 
-	LCD_Interface::main_menu.update_content(1, "ФРЕЙМ: " + value);
+	// LCD_Interface::main_menu.update_content(1, "ФРЕЙМ: " + value);
+	LCD_Interface::main_menu.update_ticker_content(1, value);
 
 	// Перерисовываем главное меню только если оно уже на экране
 	if(app_->iface.curr_menu() == &LCD_Interface::main_menu){
@@ -251,6 +252,9 @@ void Announcement_task::update_interface(int frame_id) const
 
 Background_task::signal Announcement_task::main_func(void)
 {
+	// Признак валидности предыдущих GPS координат
+	static bool was_valid = false;
+
 	// Проверка состояния задачи
 	if(this->get_current_state() == Background_task::signal::STOP){
 		return Background_task::signal::STOP;
@@ -264,11 +268,18 @@ Background_task::signal Announcement_task::main_func(void)
 
 		platform::GPS_data gps_data = navi_.update_gps_data();
 
-		if( !gps_data_is_valid(gps_data) ){
+		if( !gps_data.valid && was_valid ){
+			// Логируем пропадание валидных координат один раз
 			navi_.log_position(gps_data);
+			was_valid = false;
+		}
+
+		// Проверка готовности данных к обработке 
+		if( !gps_data_ready_for_processing(gps_data) ){
 			return Background_task::signal::SLEEP;
 		}
 
+		was_valid = true;
 		int frame_id = std::numeric_limits<int>::min();
 		const NSIDatabase::kFrames_table::MediaInfo *minfo = NSIDatabase::find_media_info(gps_data.lat_lon, gps_data.course, &frame_id);
 

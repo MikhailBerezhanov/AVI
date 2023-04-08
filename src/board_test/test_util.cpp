@@ -23,7 +23,7 @@
 #include "gpio_test.hpp"
 #include "uart_test.hpp"
 
-#define VERSION 		"1.6"
+#define VERSION 		"1.7"
 
 #ifndef _SHARED_LOG
 static Logging logger;

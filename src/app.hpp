@@ -89,6 +89,16 @@ public:
 	private:
 		mutable std::mutex mutex_;
 		uint32_t value_ = 0;
+	}; 
+
+	struct DeviceState{
+
+		void set(const std::string &state){ std::lock_guard<std::mutex> lck(mutex_); value_ = state; }
+		std::string get() const { std::lock_guard<std::mutex> lck(mutex_); return value_; }
+
+	private:
+		mutable std::mutex mutex_;
+		std::string value_ = "Инициализация";
 	};
 
 	void init(bool conf_trace = false);
@@ -96,9 +106,12 @@ public:
 
 	void create_sys_event(const std::string &ev_name, const std::string &ev_data = "") const;
 
+	Navigator::position get_current_position() const { return this->announ_task.get_position(); }
+
 	Settings settings;				// Настройки приложения
 	Directories dirs;				// Рабочие директории
 	DeviceId dev_id;				// Идентификатор устройства
+	DeviceState dev_state;			// Состояние устройства
 	mutable MainDatabase mdb; 		// Основная БД приложения
 	mutable LCD_Interface iface{this};	// Интерфейс (ЖК дисплей + кнопки)
 
@@ -120,8 +133,10 @@ private:
 	void regular_mode();		// Штатный режим работы
 	void wait_for_data(const std::string &data_type);
 
+	// RouteSelection route_selection_task{ [this](){ data_check(); } };
 	void wait_for_route_selection();
 };
+
 
 
 

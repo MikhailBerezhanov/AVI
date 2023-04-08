@@ -1,4 +1,18 @@
 # __Дополнения и настройки SDK__
+
+## Патч SDK
+```sh
+# Запуск скрипта для добавления библиотек и настроек образа
+./patch.sh 
+# libconfig installation ..
+# libprotobuf installation ..
+# libamqpcpp installation ..
+# [+] Toolchain patch succeed
+# [+] Img rootfs patch succeed
+# [+] Img usrfs patch succeed
+# [OK] SDK patch finished
+```
+
 ## Автостарт приложений
 Модуль поддерживает систему запуска __SysV-Init__ (init.d + rcS)  
 
@@ -25,6 +39,7 @@ nano ../../sim_open_sdk/tools/ubinize_system_userdata.cfg
 # Пересобираем rootfs модуля из директории sim_open_sdk
 cd ../../sim_open_sdk/ && make rootfs
 ```
+Собранный образ располагается в `sim_open_sdk/output/system.img`
 
 ## Редактирование содержмого userfs
 Чтобы создать директории для приложений, воссоздаем нужные каталоги в `sim_open_sdk/sim_usrfs`. Это будет соответствовать разделу `/data` внутри модуля.
@@ -32,9 +47,7 @@ cd ../../sim_open_sdk/ && make rootfs
 ```sh
 # Помечаем, что хотим создать в модуле директорию /data/autoinformer
 mkdir ../../sim_open_sdk/sim_usrfs/autoinformer
-cp ../output/ainf.out ../../sim_open_sdk/sim_usrfs/autoinformer/
 cp ../scripts/autostart.sh ../../sim_open_sdk/sim_usrfs/autoinformer/
-chmod +x ../../sim_open_sdk/sim_usrfs/autoinformer/ainf.out
 chmod +x ../../sim_open_sdk/sim_usrfs/autoinformer/autostart.sh
 # Пересобираем rootfs модуля из директории sim_open_sdk
 cd ../../sim_open_sdk/ && make rootfs
@@ -65,7 +78,7 @@ adb shell 'cd /data/lib && chmod +x libtest.so.1.0.0 && ln -s libtest.so.1.0.0 l
 
 Для кросс-компиляции новые библиотеки должны расположиться в следующих директориях:
 
-* `../../sim_open_sdk/sim_crosscompile/sysroots/mdm9607-perf/usr/lib/`  - `.so`, `.la` 
+* `../../sim_open_sdk/sim_crosscompile/sysroots/mdm9607-perf/usr/lib/`  - `.so`, `.a`, `.la` 
 * `../../sim_open_sdk/sim_crosscompile/sysroots/mdm9607-perf/usr/include/` - `.h`, `.hh` 
 
 
@@ -84,6 +97,7 @@ fastboot reboot
 # Rebooting                                          OKAY [  0.005s]
 # Finished. Total time: 0.006s
 ```
+![rootfs_flashing](../doc/img/rootfs_flashing.jpg)
 
 После этого нужно будет снова открыть ADB порт АТ-командами
 
@@ -91,4 +105,6 @@ fastboot reboot
 AT+CUSBADB=1
 AT+CRESET
 ```
+
+![ADB_AT_enabling](../doc/img/ADB_AT_enabling.jpg)
 

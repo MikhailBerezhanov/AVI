@@ -16,7 +16,7 @@
 class Background_task
 {
 public:
-
+	// Background_task() = default;
 	Background_task(const std::string &name = ""): task_name(name) {}
 	virtual ~Background_task(){this->cancel();}
 
@@ -38,6 +38,7 @@ public:
 
 	void send_signal(signal val){
 		std::lock_guard<std::mutex> lck(this->sig_mtx);
+		// printf("%s - sending signal %d\n", this->task_name.c_str(), static_cast<int>(val));
 		this->sig = val;
 	}
 

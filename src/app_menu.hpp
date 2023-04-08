@@ -17,6 +17,7 @@
 #include <memory>
 #include <chrono>
 #include <utility>
+#include <unordered_map>
 
 #include "utils/timer.hpp"
 
@@ -24,6 +25,66 @@ namespace avi{
 
 class AVI;
 
+// Бегущая строка
+// (может быть частью любого меню)
+class Ticker
+{
+public:
+
+	Ticker(const std::string &content = "", std::pair<int, int> start = {-1, -1}, int len = 0):
+		content_(content), start_pos_(start), visible_len_(len){}
+
+	~Ticker()
+	{
+		if(handler_.joinable()){
+			pthread_cancel(handler_.native_handle());
+			handler_.join();
+		}
+	}
+
+	// Объекты можно только перемещать 
+
+	Ticker(Ticker &&t): handler_(std::move(t.handler_)), tick_ms_(std::move(t.tick_ms_)),
+		start_pos_(std::move(t.start_pos_)), content_(std::move(t.content_)), visible_len_(std::move(t.visible_len_)) 
+	{
+		stopped_.store(t.stopped_.load());
+	}
+
+	Ticker& operator= (Ticker &&t)
+	{
+		this->stop();
+
+		if(handler_.joinable()){
+			pthread_cancel(handler_.native_handle());
+			handler_.join();
+		}
+
+		handler_ = std::move(t.handler_);
+		tick_ms_ = std::move(t.tick_ms_);
+		start_pos_ = std::move(t.start_pos_);
+		content_ = std::move(t.content_);
+		stopped_.store(t.stopped_.load());
+		visible_len_ = std::move(t.visible_len_);
+	}
+
+	void start();
+	void stop();
+
+	bool running() const { return handler_.joinable(); }
+
+private:
+	std::thread handler_;
+	std::chrono::milliseconds tick_ms_{350};
+	std::pair<int, int> start_pos_;	// start (row, col)
+	std::string content_;
+	std::atomic<bool> stopped_{false};
+	int visible_len_ = 0;
+
+	bool sleep(int ms) const;
+	void periodic_shift();
+};
+
+// Абстрактный класс меню
 class BaseMenu
 {
 public:
@@ -32,9 +93,14 @@ public:
 
 	BaseMenu(const std::initializer_list<std::string> &content = {}): content_(content) {}
 
-	virtual ~BaseMenu() { timer_.destroy(); };
+	virtual ~BaseMenu() 
+	{ 
+		timer_.destroy(); 
+		this->stop_tickers();
+	}
 
-	virtual void show() const = 0;
+	virtual void show() const = 0;	// Вызов отображения меню на экране дисплея
+	virtual void hide() const; 		// Вызов при переходе на другое меню (при сворачивании)
 
 	void update_content(std::vector<std::string> &&new_content){
 		std::lock_guard<std::recursive_mutex> lock(mutex_);
@@ -111,9 +177,49 @@ public:
 	button_callback short_enter = nullptr;
 	button_callback long_enter = nullptr;
 
+	
+	void add_ticker(int id, Ticker &&ticker) const 
+	{
+		std::lock_guard<std::recursive_mutex> lock(mutex_);
+		tickers_[id] = std::move(ticker);
+	}
+
+	void start_ticker(int id) const 
+	{
+		std::lock_guard<std::recursive_mutex> lock(mutex_);
+		auto it = tickers_.find(id);
+		if(it != tickers_.end()){
+			it->second.start();
+		}
+	}
+
+	void start_tickers() const 
+	{
+		std::lock_guard<std::recursive_mutex> lock(mutex_);
+		for(auto &elem : tickers_){
+			elem.second.start();
+		}
+	}
+
+	void stop_ticker(int id) const 
+	{
+		std::lock_guard<std::recursive_mutex> lock(mutex_);
+		auto it = tickers_.find(id);
+		if(it != tickers_.end()){
+			it->second.stop();
+		}
+	}
+
+	void stop_tickers() const 
+	{
+		std::lock_guard<std::recursive_mutex> lock(mutex_);
+		for(auto &elem : tickers_){
+			elem.second.stop();
+		}
+	}
+
 	void centrify_content(); 
 	void centrify_content_item(size_t idx);
-	// inline void add_padding_after_content(char symb = ' ');
 
 private:
 	mutable std::recursive_mutex mutex_;
@@ -122,6 +228,8 @@ private:
 	int timeout_sec_ = 0;
 	timeout_callback on_timeout_ = nullptr;
 	static utils::Timer timer_;
+
+	mutable std::unordered_map<int, Ticker> tickers_;
 };
 
 class StaticMenu : public BaseMenu
@@ -151,6 +259,22 @@ private:
 	inline void animate_symbol(uint8_t row, uint8_t col, size_t count) const;
 };
 
+class StaticMenuWithTicker : public StaticMenu
+{
+public:
+	StaticMenuWithTicker(const std::initializer_list<std::string> &static_content = {}):
+		StaticMenu(static_content), static_content_shown_(false) {}
+
+	void update_static_content(int start_row, const std::string &content);
+	void update_ticker_content(int start_row, const std::string &content);
+
+	void show() const override;
+	void hide() const override; 
+
+private:
+	mutable std::atomic<bool> static_content_shown_{false};
+};
+
 class ListMenu : public BaseMenu
 {
 	using selection_callback = std::function<void(std::string)>;
@@ -176,9 +300,9 @@ public:
 	OneLineListMenu(const std::string &header = "OneLineListMenu", const std::initializer_list<std::string> &content = {}, const std::string &empty_list_msg = "List is empty");
 
 	void show() const override;
-	
-private:
 
+private:
+	void show_option(size_t content_idx) const;
 };
 
 // Класс, обслуживающий отображение на дисплее и переназначение кнопок 
@@ -222,9 +346,16 @@ public:
 	// Экземпляры меню приложения 
 	static StaticMenuWithDynamicSymbol init_phase_menu;
 	static StaticMenu error_menu;
+	static StaticMenu ok_menu;
 	static StaticMenuWithDynamicSymbol download_phase_menu;
-	static StaticMenu main_menu;
+	static StaticMenuWithTicker main_menu;
+	static OneLineListMenu settings_menu;
 	static OneLineListMenu route_selection_menu;
+	static OneLineListMenu audio_level_menu;
+	static OneLineListMenu info_menu;
+
+	static const int menu_timeout = 5; // sec
+	static std::function< std::vector<std::string>() > update_info_menu;
 
 private:
 	const AVI *const app_ = nullptr;

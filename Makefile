@@ -35,6 +35,7 @@ SRCS_DIRS += $(SRC_DIR)/board_test
 SRCS_DIRS += $(SRC_DIR)/lc_client/src/
 SRCS_DIRS += $(SRC_DIR)/lc_client/src/proto
 SRCS_DIRS += $(SRC_DIR)/lc_client/src/logger/cpp_src
+SRCS_DIRS += $(SRC_DIR)/amqp_test
 SRCS_DIRS += $(API_DIR)
 SRCS_DIRS += $(SDK_DIR)/simcom-demo/sdk-includes/common
 SRCS_DIRS += $(SDK_DIR)/simcom-demo/sdk-includes/qmi-framework
@@ -79,8 +80,7 @@ OBJS = 	$(OBJ_DIR)/logger.o 		\
 		$(OBJ_DIR)/lc_sys_ev.o 		\
 		$(OBJ_DIR)/lc.pb.o  		\
 		$(OBJ_DIR)/log.pb.o  		\
-		$(OBJ_DIR)/log_result.pb.o  \
-		$(OBJ_DIR)/info.pb.o  		\
+		$(OBJ_DIR)/dev_status.pb.o  \
 		$(OBJ_DIR)/push.pb.o  		\
 		$(OBJ_DIR)/lc_trans.o 		\
 		$(OBJ_DIR)/lc_client.o 		\
@@ -253,10 +253,18 @@ app-test-bin: BIN_NAME = avi.test
 app-test-bin: CXXFLAGS = -std=c++11 -g 
 app-test-bin: DEFINES += -D_APP_TEST -D_SHARED_LOG -D_HOST_BUILD -DMAKE_VALGRIND_HAPPY
 app-test-bin: $(addprefix $(OBJ_DIR)/, logger.o utility.o fs.o datetime.o crypto.o iconvlite.o timer.o bg_task.o  \
-lc_trans.o lc_sys_ev.o lc.pb.o log.pb.o log_result.pb.o info.pb.o push.pb.o lc_utils.o lc_protocol.o lc_client.o \
+lc_trans.o lc_sys_ev.o lc.pb.o log.pb.o push.pb.o dev_status.pb.o lc_utils.o lc_protocol.o lc_client.o \
 i2c.o lcd1602.o platform.o nmea_parser.o gps_gen.o announ.o app_db.o app_cfg.o app_lc.o app_menu.o app.o main.o)
 	@echo "\033[32m>\033[0m linking test: $(BIN_NAME)"
 	@$(CXX) $(LINKS) $(LDFLAGS) -o $(TEST_DIR)/$(BIN_NAME) $^ -pthread -lsqlite3 -lconfig -lcurl -lcrypto -lprotobuf -luuid -lrt -lncursesw
 app-test: TEST_DIR = $(MAIN_DIR)/tests/avi
 app-test: prep info app-test-bin
 
+# AMQP (RabbitMQ client) tests
+amqp-test-bin: BIN_NAME = amqp_send_recv.test
+amqp-test-bin: DEFINES += -D_SHARED_LOG
+amqp-test-bin: $(addprefix $(OBJ_DIR)/, logger.o my_handler.o send_recv.o)
+	@echo "\033[32m>\033[0m linking test: $(BIN_NAME)"
+	@$(CXX) $(LINKS) $(LDFLAGS) -o $(TEST_DIR)/$(BIN_NAME) $^ -pthread -lamqpcpp -ldl -lssl
+amqp-test: TEST_DIR = $(MAIN_DIR)/tests/amqp
+amqp-test: prep info amqp-test-bin

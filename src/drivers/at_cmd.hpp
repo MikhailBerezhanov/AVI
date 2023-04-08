@@ -75,7 +75,9 @@ public:
 	std::string get_IMEI();
 	std::string get_module_revision();
 
-	void enable_GPS();
+	// Default gps data update period = 1 sec.
+	// If increased_update_rate is set - update period = 100 ms (10 Hz)
+	void enable_GPS(bool increased_update_rate = false);
 	void disable_GPS();
 	bool check_GPS_status();
 

@@ -1,4 +1,3 @@
-
 #include <stdexcept>
 #include <cinttypes>
 
@@ -9,7 +8,7 @@
 #include "app_menu.hpp"
 #include "app.hpp"
 
-// Custom characters location in LCD memory
+// Месторасположение пользовательских символов в памяти дисплея
 #define ARROWS 		0
 #define UP_ARROW 	1
 #define DOWN_ARROW 	2
@@ -19,7 +18,163 @@
 
 namespace avi{
 
+// Таймер отключения подсветки дисплея
 utils::Timer BaseMenu::timer_;
+
+bool Ticker::sleep(int ms) const
+{
+	int cnt = 0;
+
+	while(cnt < ms){
+
+		if(stopped_.load()){
+			return false;
+		}
+
+		cnt += 50;
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	}
+
+	return true;
+}
+
+// Получение массива расстояний до символов строки в байтах (UTF-8)
+static std::vector<int> get_symb_distances(const std::string &s)
+{
+	// Массив расстояний до символов строки в байтах содержит 
+	// кол-во байт до начала символа на позиции, соответствующей 
+	// индексу. Индексация с нуля. (Перед 0-вым символом 0 байт) 
+	std::vector<int> res = {0};
+
+	size_t curr_distance = 0;
+	const uint8_t *ptr = reinterpret_cast<const uint8_t*>(s.c_str());
+
+	while(*ptr){
+
+		if((*ptr >> 7) == 0x00){
+			++curr_distance;
+			++ptr;
+		}
+		else{
+			// Остальное считаем двухбайтовыми символами (Кириллица)
+			curr_distance += 2;
+			ptr += 2;
+		}
+
+		res.push_back(curr_distance);
+	}
+
+	return res;
+}
+
+// Обработчик отображения бегущей строки
+void Ticker::periodic_shift()
+{
+	std::vector<int> symb_distances = get_symb_distances(content_);
+	const size_t symb_num = symb_distances.size() - 1;
+
+	int curr_symb_num = 1;
+	int curr_pos = 0;
+	int max_pos = symb_distances.at(symb_num - visible_len_);	// symb_num > visible_len
+	int direction = 1;
+	uint8_t sleep_miltiplier = 2;	// На первом и последнем символе замираем дольше 
+
+	stopped_.store(false);
+
+	for(;;){
+
+		if(platform::lcd_get_backlight_state() == false){
+			
+			if( !sleep(tick_ms_.count()) ){
+				return;
+			}
+
+			continue;
+		}
+
+		int shift = 0;
+		int count = symb_distances.at(curr_symb_num + visible_len_ - 1) - symb_distances.at(curr_symb_num - 1);
+
+		if(direction > 0){
+			// Прямое направление (сдвиг слева направо)
+			
+			// Проверка UTF-8 октета начала
+			shift = (content_.at(curr_pos) >> 7 == 0x00) ? 1 : 2;
+		}
+		else if(direction < 0){
+			// В обработную строноу (сдвиг справа налево)
+
+			size_t idx = (curr_symb_num >= 2) ? curr_symb_num - 2 : 0;
+
+			shift = (content_.at( symb_distances.at(idx) ) >> 7 == 0x00) ? 1 : 2;
+		}
+
+		// printf("(%s) curr_pos: %d,count : %d, shift: %d\n", content_.c_str(), curr_pos, count, shift);
+
+		platform::lcd_set_cursor(start_pos_.first, start_pos_.second);
+		platform::lcd_print(content_.substr(curr_pos, count));
+
+		curr_symb_num += direction;
+		curr_pos += direction * shift;
+		sleep_miltiplier = 1;
+
+		if(curr_pos > max_pos){
+			curr_symb_num = symb_num - visible_len_ + 1;
+			curr_pos = max_pos;
+			direction = -1;	// Обратный сдвиг
+			sleep_miltiplier = 2;
+		}
+
+		if(curr_pos < 0){
+			curr_symb_num = 1;
+			curr_pos = 0;
+			direction = 1;
+			sleep_miltiplier = 2;
+		}
+
+		if( !sleep(sleep_miltiplier * tick_ms_.count()) ){
+			return;
+		}
+	}
+}
+
+void Ticker::start()
+{
+	if(number_of_symbols(content_.c_str()) <= visible_len_){
+		// Нет необходимости в бегущей строке для 
+		// длины соответствующей области видимости
+		platform::lcd_set_cursor(start_pos_.first, start_pos_.second);
+		platform::lcd_print(content_);
+		return;
+	}
+
+	if(handler_.joinable()){
+		return;
+	}
+
+	// Запуск потока отображения бегущей строки
+	std::thread t([this](){ this->periodic_shift(); });
+	handler_ = std::move(t);
+}
+
+void Ticker::stop()
+{
+	stopped_.store(true);
+
+	if(handler_.joinable()){
+		handler_.join();
+	}
+}
+
+
+// -----------------------------------------------------------------------------------------------
+
+void BaseMenu::hide() const
+{
+	this->stop_tickers();
+
+	platform::lcd_clear();
+}
 
 std::vector<std::string> BaseMenu::get_content_values(size_t from, size_t to) const
 {
@@ -68,21 +223,6 @@ void BaseMenu::centrify_content()
 	was_centrified_ = true;
 }
 
-// void BaseMenu::add_padding_after_content(char symb)
-// {
-// 	std::lock_guard<std::recursive_mutex> lock(mutex_);
-
-// 	for(auto &elem : content_){
-// 		size_t len = number_of_symbols(elem.c_str());
-// 		int indent_len = platform::lcd_get_num_cols() - len;
-
-// 		if(indent_len > 0){
-// 			elem += std::string(indent_len, symb);
-// 		}
-
-// 	}
-// }
-
 // -----------------------------------------------------------------------------------------------
 
 void StaticMenu::show() const
@@ -114,7 +254,7 @@ inline size_t StaticMenuWithDynamicSymbol::get_symbol_position(uint8_t &row, uin
 		}
 
 		row = static_cast<uint8_t>(i);
-		// str can contain not only ASCII symbols
+		// Строка содержит UTF-8 (не только ASCII) символы - вычисляем их кол-во
 		col = number_of_symbols(curr_value.substr(0, start_pos).c_str());
 
 		size_t end_pos = curr_value.find_last_of(dyn_symdol_);
@@ -155,14 +295,64 @@ void StaticMenuWithDynamicSymbol::show() const
 	uint8_t symb_col = 0;
 	size_t count = this->get_symbol_position(symb_row, symb_col);
 
-	// printf("Symb %c row: %u, col: %u, num: %zu\n", dyn_symdol_, symb_row, symb_col, symb_num);
-
 	if(count == 0){
 		return;
 	}
 
-	// Blocking
+	// Блокирующий вызов
 	this->animate_symbol(symb_row, symb_col, count);
+}
+
+// -----------------------------------------------------------------------------------------------
+
+void StaticMenuWithTicker::update_static_content(int start_row, const std::string &content)
+{
+	if(start_row >= this->get_content_size()){
+		this->add_content(content);
+	}
+	else{
+		this->update_content(start_row, content);
+	}
+}
+
+void StaticMenuWithTicker::update_ticker_content(int start_row, const std::string &content)
+{
+	const size_t symb_num = number_of_symbols(content.c_str());
+
+	std::string curr_content;
+
+	// Есть ли статическое содержимое на заданной строке
+	if(start_row < this->get_content_size()){
+		curr_content = this->get_content_value(start_row);
+	}
+
+	// Вычисляем доступное для отображения бегущей строки место
+	int start_col = number_of_symbols(curr_content.c_str());
+	int visible_len = platform::lcd_get_num_cols() - start_col;
+
+	// Создаем новую или обновляем существующую бегущую строку
+	Ticker ticker(content, {start_row, start_col}, visible_len);
+
+	// Если текущий существует - останавливаем 
+	this->stop_ticker(start_row);
+	this->add_ticker(start_row, std::move(ticker));
+}
+
+void StaticMenuWithTicker::show() const
+{
+	// Статический контент не требуется отображать каждый вызов
+	if( !static_content_shown_.load() ){
+		StaticMenu::show();
+		static_content_shown_ = true;
+	}
+
+	this->start_tickers();
+}
+
+void StaticMenuWithTicker::hide() const
+{
+	static_content_shown_.store(false);
+	BaseMenu::hide();
 }
 
 // -----------------------------------------------------------------------------------------------
@@ -178,7 +368,7 @@ ListMenu::ListMenu(const std::string &main_header, const std::string &sub_header
 				--position_;
 			}
 			
-			// Show headers
+			// Отобразить заголовки
 			platform::lcd_clear();
 			platform::lcd_home();
 			this->show();
@@ -203,8 +393,6 @@ ListMenu::ListMenu(const std::string &main_header, const std::string &sub_header
 			return;
 		}
 
-		// platform::lcd_clear();
-
 		platform::lcd_set_cursor(0, 0);
 		platform::lcd_print_with_padding(BaseMenu::get_content_value(position_));
 		platform::lcd_set_cursor(0, LAST_COL);
@@ -216,7 +404,7 @@ ListMenu::ListMenu(const std::string &main_header, const std::string &sub_header
 		platform::lcd_print_with_padding( position_ < list_size ? BaseMenu::get_content_value(position_) : " ");
 	};
 
-	// select
+	// Нажатие кнопки "выбор"
 	short_enter = [this]()
 	{
 		if( !on_select ){
@@ -261,8 +449,7 @@ OneLineListMenu::OneLineListMenu(const std::string &header, const std::initializ
 
 		--position_;
 
-		platform::lcd_set_cursor(1, 0);
-		platform::lcd_print_with_padding(BaseMenu::get_content_value(position_ - 1));
+		this->show_option(position_ - 1);
 
 		platform::lcd_set_cursor(1, LAST_COL);
 		if(position_ == 1){
@@ -281,9 +468,8 @@ OneLineListMenu::OneLineListMenu(const std::string &header, const std::initializ
 			return;
 		}
 
-		platform::lcd_set_cursor(1, 0);
-		platform::lcd_print_with_padding(BaseMenu::get_content_value(position_));
-		
+		this->show_option(position_);
+
 		++position_;
 
 		platform::lcd_set_cursor(1, LAST_COL);
@@ -296,6 +482,25 @@ OneLineListMenu::OneLineListMenu(const std::string &header, const std::initializ
 	};
 }
 
+void OneLineListMenu::show_option(size_t content_idx) const
+{
+	std::string content = BaseMenu::get_content_value(content_idx);
+	const int max_len = platform::lcd_get_num_cols() - 2;
+
+	this->stop_ticker(1);
+
+	if(number_of_symbols(content.c_str()) > max_len){
+
+		Ticker ticker{content, {1, 0}, max_len};
+
+		this->add_ticker(1, std::move(ticker));
+		this->start_ticker(1);
+	}
+	else{
+		platform::lcd_set_cursor(1, 0);
+		platform::lcd_print_with_padding(content);
+	}
+}
 
 void OneLineListMenu::show() const
 {
@@ -312,8 +517,8 @@ void OneLineListMenu::show() const
 	}
 
 	position_ = 1; // Первая опция в списке выбрана по умолчанию
-	platform::lcd_set_cursor(1, 0);
-	platform::lcd_print(BaseMenu::get_content_value(0));
+	
+	this->show_option(0);
 
 	platform::lcd_set_cursor(1, LAST_COL);
 	if(list_size == 1){
@@ -331,28 +536,76 @@ void OneLineListMenu::show() const
 
 StaticMenuWithDynamicSymbol LCD_Interface::init_phase_menu{ {"ИНИЦИАЛИЗАЦИЯ...", "Версия: ХХ.ХХ"}, '.', std::chrono::milliseconds(250) };
 StaticMenu LCD_Interface::error_menu{ {"ОШИБКА!", "ХХХ"} };
+StaticMenu LCD_Interface::ok_menu{ {"ОК"} };
+
 StaticMenuWithDynamicSymbol LCD_Interface::download_phase_menu{ {"ЗАГРУЗКА", "ДАННЫХ ..."}, '.', std::chrono::milliseconds(250) };
-StaticMenu LCD_Interface::main_menu{ {"МАРШРУТ: ХХХХ", "ФРЕЙМ: XXXX"} };
+StaticMenuWithTicker LCD_Interface::main_menu{ {"МАРШРУТ: ", "ФРЕЙМ: "} };
+
+OneLineListMenu LCD_Interface::settings_menu{"НАСТРОЙКИ", {"СМЕНА МАРШРУТА", "ГРОМКОСТЬ", "ИНФОРМАЦИЯ"}};
 OneLineListMenu LCD_Interface::route_selection_menu{"ВЫБОР МАРШРУТА:", {}, "XXXX"};
+OneLineListMenu LCD_Interface::audio_level_menu{"ГРОМКОСТЬ", {"0", "1", "2", "3", "4"}};
+OneLineListMenu LCD_Interface::info_menu{"ИНФОРМАЦИЯ"};
+std::function< std::vector<std::string>() > LCD_Interface::update_info_menu = nullptr;
 
 std::atomic<bool> LCD_Interface::need_render_{false};
 
 void LCD_Interface::setup_menus()
 {
 	init_phase_menu.centrify_content();
-
 	download_phase_menu.centrify_content();
-
 	error_menu.centrify_content();
+	ok_menu.centrify_content();
 
-	// route_selection_menu.setup_timeout(5, [this](){ display(&main_menu); });
-	// route_selection_menu.on_select = [this](std::string s){ 
-	// 	printf("selected: '%s'\n", s.c_str()); 
-	// 	const std::string &value = s.empty() ? "XXXX" : s;
-	// 	display(&main_menu, { {0, "МАРШРУТ: " + value} }); 
-	// };
+	ok_menu.setup_timeout(1, [this](){ display(&main_menu); });
 
-	main_menu.long_enter = [this](){ display(&route_selection_menu); };
+	// Меню настроек
+	settings_menu.on_select = [this](std::string option){
+
+		if(option == "СМЕНА МАРШРУТА"){
+			display(&route_selection_menu);
+		}
+		else if(option == "ГРОМКОСТЬ"){
+			display(&audio_level_menu);
+		}
+		else if(option == "ИНФОРМАЦИЯ"){
+
+			if( !update_info_menu ){
+				return;
+			}
+
+			std::vector<std::string> info_content = update_info_menu();
+			info_menu.update_content(std::move(info_content));
+			display(&info_menu);
+		}
+	};
+
+	settings_menu.setup_timeout(menu_timeout, [this](){ display(&main_menu); });
+
+	// Настройки Аудио
+	audio_level_menu.on_select = [this](std::string option){
+
+		try{
+			int level = std::stoi(option);
+			platform::audio_set_gain_level(level);
+
+			display(&ok_menu);
+		}
+		catch(const std::exception &e){
+			log_excp("audio_level_menu.on_select: %s\n", e.what());
+			display(&main_menu);
+		}
+	};
+
+	audio_level_menu.setup_timeout(menu_timeout, [this](){ display(&main_menu); });
+
+	// Меню Информации об устройстве
+	info_menu.setup_timeout(menu_timeout, [this](){ display(&main_menu); });
+	info_menu.on_select = [this](std::string option){ display(&settings_menu); };
+
+	// Главное меню
+	main_menu.long_enter = [this](){ display(&settings_menu); };
+	main_menu.update_ticker_content(0, "НЕ ВЫБРАН");
+	main_menu.update_ticker_content(1, "XXXX");	// по умолчанию нет попадани ни в один фрейм 
 }
 
 void LCD_Interface::prepare()
@@ -365,7 +618,7 @@ void LCD_Interface::prepare()
 		throw std::invalid_argument(excp_method("app was not set (nullptr)"));
 	}
 
-	// Load custom characters to the LCD memory
+	// Загрузка пользовательских символов в память дисплея
 	uint8_t arrows[8] = {
 		0b00100,
 		0b01110,
@@ -465,6 +718,12 @@ void LCD_Interface::display(BaseMenu *menu_ptr, const std::vector<std::pair<size
 		}
 	}
 
+	const BaseMenu* curr_menu = this->curr_menu();
+	if( curr_menu && (curr_menu != menu_ptr) ){
+		// Прячем текущее меню при запросе отображения нового
+		curr_menu->hide();
+	}
+	
 	{
 		std::lock_guard<std::mutex> lock(mutex_);
 		for_render_ = menu_ptr;
@@ -527,7 +786,6 @@ void LCD_Interface::render()
 		menu->start_timer();
 
 		// Отображение содержимого меню
-		platform::lcd_clear();
 		platform::lcd_home();
 		platform::lcd_backlight(true);
 		LCD_Interface::backlight_timer_.reset(app_->settings.lcd_backlight_timeout);

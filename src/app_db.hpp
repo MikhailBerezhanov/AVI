@@ -367,9 +367,10 @@ public:
 	static void show_cfg_params();
 	static void show_frames();
 
-	static std::vector<std::string> get_available_routes();
+	static std::vector<std::string> get_available_route_names();
 
 	static void select_route(int route_id);
+	static void select_route(const std::string &route_name);
 
 	static int get_current_route(){
 		std::lock_guard<std::mutex> lock(curr_route_mutex_);
@@ -384,6 +385,8 @@ public:
 	// Заполняет структуру frames_ в соответствии с выбранным 
 	// при помощи select_route() идентификатором маршрута 
 	static void reload_route_frames();
+
+	static bool check_media_content_presence(const std::string &media_dir);
 
 	template<typename T>
 	static T get_cfg_param(const std::string &param_name, T default_value)

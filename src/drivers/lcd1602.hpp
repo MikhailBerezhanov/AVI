@@ -161,6 +161,6 @@ private:
 	void print_str(const char *str, Alignment align_type) override;
 };
 
-size_t number_of_symbols(const char *str, size_t *str_len = nullptr);
+size_t number_of_symbols(const char *str, size_t *bytes_num = nullptr);
 
 #endif

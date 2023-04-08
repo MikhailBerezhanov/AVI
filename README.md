@@ -1,32 +1,35 @@
 # __Автоинформатор 1.0__
 ### (На основе SIM7600E-H OpenLinux SDK)
 
-Основная функция устройства - автоматическое воспроизведение заданных аудио-файлов в зависимости от текущего местоположения. Обновление карты зон и аудио-фрагментов осуществляется онлайн по мобильной сети. Для контроля и управления устройством используется LCD-дисплей с набором кнопок.
-
-Помимо целевой платформы (модуль SIM7600E-H) приложение можно собрать и под хост систему Ubuntu18.04 - в таком случае будут симулироваться следующие компоненты (см. src/platform.cpp):
-
-* поток GPS NMEA данных
-* интерфейс LCD-дисплея и кнопок 
-* аудио воспроизведение
 
 ## Вспомогательное ПО
 
 Драйверы:  
 
-* [для всех версий Windows][win_driver]
-* [для Linux][linux_driver]
+* для всех версий Windows
+    * [MTsys google drive][mt-sys-win_driver]
+    * Socsys cloud:  http://dl.socsys.cloud/git/SIM7000_SIM7100_SIM7500_SIM7600_SIM7800%20Series%20Windows%20USB%20driver_V1.02.rar
+* для Linux
+    * [MTsys google drive][mt-sys-linux_driver]
+    * Socsys cloud:  http://dl.socsys.cloud/git/SIM7500_SIM7600%20Linux%20NDIS_Driver_V2.01.zip
 
 Программа для обновления прошивки модуля:
 
-* [SIM_QDL][sim_qdl]
+* SIM_QDL
+    * [MTsys google drive][mt-sys-sim_qdl]
+    * Socsys cloud:  http://dl.socsys.cloud/git/SIM7080_SIM7500_SIM7600_SIM7900_SIM8200%20QDL%20V1.66%20Only%20for%20Update.rar
 
 Программа конфигурации и восстановления модуля:
 
-* [SIM_QPST][sim_qpst]
+* SIM_QPST
+    * [MTsys google drive][mt-sys-sim_qpst]
+    * Socsys cloud:  http://dl.socsys.cloud/git/qpst.win.2.7_installer_00491.1.zip
 
 Инструментарий для разработки приложений:
 
-* [SIM_OPEN_SDK][open_sdk]
+* SIM_OPEN_SDK
+    * [MTsys google drive][mt-sys-open_sdk]
+    * Socsys cloud:  http://dl.socsys.cloud/git/-Open%20Linux-20221011T132246Z-001.zip
 
 ## Подключение модуля к ПК
 
@@ -210,12 +213,8 @@ source ./env_init.sh
 
 
 
-[win_driver]: https://goo.gl/jK5KS4 "win_driver"
-[linux_driver]: https://goo.gl/g7qr5w "linux_driver"
-[sim_qdl]: https://drive.google.com/file/d/1t4O6gTTZkQGW6CEIo9JCpMjjQwqoZaTL/view "QDL v1.66"
-[sim_qpst]: https://drive.google.com/file/d/1K5DxiYI6Ah3ygFKLkLt_xe-94qXrWEeB/view "QPST v2.7"
-[open_sdk]: https://drive.google.com/drive/folders/1rhtenK5DoPCR-x09FrPCWT3WQtmrcy5L "OpenLinux SDK v1.14"
-
-
-
-
+[mt-sys-win_driver]: https://goo.gl/jK5KS4 "mt-sys win_driver"
+[mt-sys-linux_driver]: https://goo.gl/g7qr5w "mt-sys linux_driver"
+[mt-sys-sim_qdl]: https://drive.google.com/file/d/1t4O6gTTZkQGW6CEIo9JCpMjjQwqoZaTL/view "mt-sys QDL v1.66"
+[mt-sys-sim_qpst]: https://drive.google.com/file/d/1K5DxiYI6Ah3ygFKLkLt_xe-94qXrWEeB/view "mt-sys QPST v2.7"
+[mt-sys-open_sdk]: https://drive.google.com/drive/folders/1rhtenK5DoPCR-x09FrPCWT3WQtmrcy5L "mt-sys OpenLinux SDK v1.14"

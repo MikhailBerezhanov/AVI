@@ -79,11 +79,11 @@ void AVI::create_sys_event(const std::string &ev_name, const std::string &ev_dat
 		}
 
 		lc::sys_event sev(event_info);
-		const auto pos = announ_task.get_position();
+		const Navigator::position pos = announ_task.get_position();
 					
-		sev.gps_valid = static_cast<uint32_t>(std::get<0>(pos));
-		sev.gps_latitude = std::to_string(std::get<1>(pos));			
-		sev.gps_longitude = std::to_string(std::get<2>(pos));
+		sev.gps_valid = static_cast<uint32_t>(pos.valid);
+		sev.gps_latitude = std::to_string(pos.latitude);
+		sev.gps_longitude = std::to_string(pos.longitude);
 
 		// Нумерация системных событий сквозная. Для синхронизации доступа из разных частей
 		// приложения - инкремент, получение и сохранение счетчика в БД - одна целостная операция
@@ -131,8 +131,8 @@ bool AVI::nsi_reload() const
 		res = true;
 
 		// Обновляем содержимое меню выбора маршрута 
-		std::vector<std::string> routes_ids = NSIDatabase::get_available_routes();
-		LCD_Interface::route_selection_menu.update_content(std::move(routes_ids));
+		std::vector<std::string> route_names = NSIDatabase::get_available_route_names();
+		LCD_Interface::route_selection_menu.update_content(std::move(route_names));		
 	}
 	else{
 		log_warn("Couldn't open NSI (%s)\n", this->dirs.nsi_db_path);
@@ -170,7 +170,7 @@ void AVI::preinit(bool conf_trace, bool first_time_called)
 
 		if(first_time_called) log_msg(MSG_DEBUG | MSG_TO_FILE, _BOLD "~ %s log started (version: '%s', build-time: %s %s) ~\n" _RESET, APP_NAME, APP_VERSION, __DATE__, __TIME__);
 
-		platform::init(dirs.gps_gen_path);
+		platform::init(this->settings.gps_poll_period_ms, dirs.gps_gen_path);
 		std::string imei = platform::get_IMEI();
 
 		if( !dirs.config_path.empty() ){ log_msg(MSG_DEBUG | MSG_TO_FILE, _GREEN "Config file path:\t\t" _BOLD "'%s'\n" _RESET, dirs.config_path); } 
@@ -221,9 +221,27 @@ void AVI::interface_init()
 		// кнопки и не должна содержать "тяжелых" вызовов)
 		LCD_Interface::route_selection_menu.on_select = [this](std::string s){ 
 			const std::string &value = s.empty() ? "XXXX" : s;
-			NSIDatabase::select_route(std::stoi(s));
-			LCD_Interface::main_menu.update_content(0, "МАРШРУТ: " + value);
+			// NSIDatabase::select_route(std::stoi(s));
+			NSIDatabase::select_route(s);
+			// LCD_Interface::main_menu.update_content(0, "МАРШРУТ: " + value);
+			LCD_Interface::main_menu.update_ticker_content(0, value);
 			this->data_check();
+		};
+
+		// Заполняем информационное меню текущими значениями
+		this->iface.update_info_menu = [this]() -> std::vector<std::string> 
+		{
+			std::vector<std::string> res;
+			res.emplace_back( "версия: " APP_VERSION );
+			res.emplace_back( "ид: " + std::to_string(this->dev_id.get()) );
+			res.emplace_back( "громкость: " + std::to_string(platform::audio_get_gain_level()) );
+
+			// TODO
+			res.emplace_back( "маршрут: " + std::to_string(NSIDatabase::get_current_route()));
+			res.emplace_back( "сервер: " );
+			res.emplace_back( "порт: " );
+
+			return res;
 		};
 
 		this->iface.prepare();
@@ -322,15 +340,17 @@ void AVI::data_check()
 		return;
 	}
 
+	// База либо обновилась после скачивания с сервера, 
+	// либо использовалась найденная на диске
+
+	// Проверка наличия медиа файлов
 	if( !utils::get_dir_size(dirs.media_dir) ){
 		log_warn("No media-content found at '%s'\n", dirs.media_dir);
 		this->wait_for_data("медиа");
 		return;
 	}
 
-	// База либо обновилась после скачивания с сервера, 
-	// либо использовалась найденная на диске
-
+	// Проверка выбран ли маршрут
 	if( !NSIDatabase::route_selected() ){
 		log_warn("NSI route is not selected\n");
 		this->wait_for_route_selection();
@@ -346,6 +366,15 @@ void AVI::data_check()
 	NSIDatabase::reload_route_frames();
 	NSIDatabase::close();
 	NSIDatabase::show_frames();
+
+	log_info("Selected route: %d\n", NSIDatabase::get_current_route());
+
+	// Проверка наличия необходимых медиа файлов с учетом выбранного маршрута
+	if( !NSIDatabase::check_media_content_presence(dirs.media_dir) ){
+		log_warn("Not all media-content for selected route found\n");
+		this->wait_for_data("медиа");
+		return;
+	}
 	
 	// Переход в штатный режим работы
 	this->regular_mode();
@@ -359,6 +388,8 @@ void AVI::wait_for_data(const std::string &data_type)
 
 	// Перевести клиент ЛЦ в режим запроса файлов и ждать очередного вызова data_check()
 	this->lc_task.enter_download_mode();
+
+	this->dev_state.set("Ожидание " + data_type + " данных");
 }
 
 void AVI::wait_for_route_selection()
@@ -370,6 +401,8 @@ void AVI::wait_for_route_selection()
 
 	// Ожидаем выбора через push-сообщение
 	this->lc_task.enter_regular_mode();
+
+	this->dev_state.set("Ожидание выбора маршрута");
 }
 
 void AVI::regular_mode()
@@ -377,7 +410,7 @@ void AVI::regular_mode()
 	log_msg(MSG_DEBUG | MSG_TO_FILE, _BOLD "~ %s entering regular mode ~\n" _RESET, APP_NAME);
 
 	this->iface.display(&LCD_Interface::main_menu);
-	LCD_Interface::route_selection_menu.setup_timeout(5, [this](){ iface.display(&LCD_Interface::main_menu); });
+	LCD_Interface::route_selection_menu.setup_timeout(LCD_Interface::menu_timeout, [this](){ iface.display(&LCD_Interface::main_menu); });
 
 	this->lc_task.enter_regular_mode();
 
@@ -398,6 +431,9 @@ void AVI::regular_mode()
 		this->announ_task.init(&this->dirs.media_dir);
 		this->announ_task.start(true);
 	}
+
+	this->dev_state.set("Штатный режим работы (маршрут: " + 
+		std::to_string(NSIDatabase::get_current_route()) + ")");
 }
 
 void AVI::deinit()

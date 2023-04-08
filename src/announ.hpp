@@ -15,7 +15,6 @@
 
 #include <string>
 #include <mutex>
-#include <tuple>
 #include <utility>
 #include <queue>
 
@@ -34,11 +33,20 @@ class Navigator
 {
 public:
 
+	struct position{
+		position(bool vld = false, double lat = 0.0, double lon = 0.0): 
+			valid(vld), latitude(lat), longitude(lon) {}
+
+		bool valid = false;
+		double latitude = 0.0;
+		double longitude = 0.0;
+	};
+
 	void init(const std::string &log_file_name = "");
 
-	std::tuple<bool, double, double> get_position() const {
+	position get_position() const {
 		std::lock_guard<std::mutex> lock(mutex_);
-		return std::make_tuple(data_.valid, data_.lat_lon.first, data_.lat_lon.second);
+		return position(data_.valid, data_.lat_lon.first, data_.lat_lon.second);
 	}
 
 	platform::GPS_data get_gps_data() const {
@@ -148,7 +156,7 @@ public:
 		Background_task::cancel();
 	}
 
-	std::tuple<bool, double, double> get_position() const { return navi_.get_position(); }
+	Navigator::position get_position() const { return navi_.get_position(); }
 
 private:
 	const AVI *const app_ = nullptr;
@@ -158,7 +166,7 @@ private:
 	int gps_validity_counter_ = 0;
 
 	Background_task::signal main_func(void) override;
-	bool gps_data_is_valid(const platform::GPS_data &data) noexcept;
+	bool gps_data_ready_for_processing(const platform::GPS_data &data) noexcept;
 
 	// Обновить отображение текущего фрейма
 	void update_interface(int frame_id) const;

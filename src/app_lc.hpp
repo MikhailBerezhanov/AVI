@@ -20,17 +20,55 @@ namespace avi{
 class AVI;
 
 // Информация об устройстве для периодической отправки на сервер
-class AVI_Info final : public LC_base_device_info
+class AVI_Status final : public LC_device_status
 {
 public:
-	AVI_Info(const std::string &version = "undefined", const std::string &state = "undefined"); 
+	AVI_Status(const std::string &version = "undefined", const std::string &state = "undefined"); 
 
 	std::string serialize_to_proto() const override;
 
-	pb::AviInfo info;
+	void set_state(const std::string &new_state)
+	{
+		std::lock_guard<std::mutex> lck(this->mtx);
+		this->status.mutable_base()->set_state(new_state);
+	}
+
+	void set_prev_push_info(const std::string &uid, const std::string &date)
+	{
+		std::lock_guard<std::mutex> lck(this->mtx);
+		this->status.mutable_base()->set_prev_push_uid(uid);
+		this->status.mutable_base()->set_prev_push_date(date);
+	}
+
+	void set_sd_free_space(uint32_t megabytes)
+	{
+		std::lock_guard<std::mutex> lck(this->mtx);
+		this->status.set_sd_free_space(megabytes);
+	}
+
+	void set_nsi(const std::string &version, const std::string &date = "")
+	{
+		std::lock_guard<std::mutex> lck(this->mtx);
+		this->status.set_nsi_version(version);
+		if( !date.empty() ){
+			this->status.set_nsi_update_date(date);
+		}
+	}
+
+	void set_latitude_longitude(const std::string &lat, const std::string &lon)
+	{
+		std::lock_guard<std::mutex> lck(this->mtx);
+		this->status.set_latitude(lat);
+		this->status.set_longitude(lon);
+	}
+
 private:
+	mutable std::mutex mtx;
+	pb::AviStatus status;
 };
 
+
+// 
 class LC_client_task final : public Background_task
 {
 	using session_finished_cb = std::function<void()>;
@@ -75,6 +113,8 @@ public:
 	update_cb on_software_update = nullptr;
 	session_finished_cb on_download_finished = nullptr;
 
+	AVI_Status avi_status{APP_VERSION};
+
 private:
 	const AVI *const app = nullptr; 	// Указатель на общие данные приложения
 	Mode mode = Mode::suspend;
@@ -95,6 +135,10 @@ private:
 	int download_period_cnt = 1;
 	void reset_download_period_cnt();
 	bool download_period_elapsed();
+
+	// Отправка статуса устройства
+	void send_device_status();
+
 	Background_task::signal main_func(void) override;
 
 	void save_as_b64(const std::string &type, const std::string &content, const std::string &ver);

@@ -58,16 +58,20 @@ struct GPS_data
 	bool valid = false;
 };
 
-void init(const std::string &gps_generator_file = "");
+void init(int gps_poll_period_ms, const std::string &gps_generator_file = "");
 bool ready();
 void deinit();
 
 std::string get_IMEI();
 GPS_data get_GPS_data();
 
+void set_LED(bool enable);
+
 void audio_play(const std::string &mp3);
 bool audio_is_playing();
 void audio_setup_stop_callback(std::function<void(void)> func);
+void audio_set_gain_level(int value);
+int audio_get_gain_level();
 void audio_stop();
 
 // Buttons ids (3 buttons available in current revision)

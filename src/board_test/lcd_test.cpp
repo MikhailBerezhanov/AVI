@@ -62,14 +62,14 @@ void LCDTest::test(const std::vector<std::string> &params)
 		wait(5);
 		Hardware::lcd->clear();
 
-		const char *s = "bibka";
-		std::string str = "Бабушка";
+		const char *s = "c-string";
+		std::string str = "ру_строка";
 		int ival = 123;
 		double dval = 43.567890;
 
 		Hardware::lcd->print("%s_%lf", s, dval);
 		Hardware::lcd->set_cursor(1, 0);
-		Hardware::lcd->print("Wру: %s %d", str.c_str(), ival);
+		Hardware::lcd->print("Тест: %s %d", str.c_str(), ival);
 		wait(5);
 		Hardware::lcd->clear();
 	}

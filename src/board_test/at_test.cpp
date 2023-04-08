@@ -35,9 +35,20 @@ void ATTest::info(const std::vector<std::string> &params)
 
 	logger.msg(MSG_DEBUG, "GPS status: %s\n", Hardware::AT->check_GPS_status());
 
-	std::string s = Hardware::AT->send("AT+CGPSINFO");
-	logger.msg(MSG_DEBUG, "GPS data: %s\n", s);
-	logger.hex_dump(MSG_DEBUG, s.c_str(), s.length(), "GPS data as hex_dump: ");
+	// Get some gps-data samples
+	std::array<std::string, 5> gps_msgs;
+
+	for(size_t i = 0; i < gps_msgs.size(); ++i){
+		gps_msgs[i] = Hardware::AT->send("AT+CGPSINFO");
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	}
+
+	for(size_t i = 0; i < gps_msgs.size(); ++i){
+		logger.msg(MSG_DEBUG, "GPS data %zu: %s\n", i, gps_msgs[i]);
+		// logger.hex_dump(MSG_DEBUG,  gps_msgs[i].c_str(),  gps_msgs[i].length(), "GPS data as hex_dump: ");
+	}
+
+	
 
 	// Hardware::AT->get_IMEI();
 	// Hardware::AT->get_module_revision();

@@ -18,7 +18,7 @@ void GPIOTest::led_set(const std::vector<std::string> &params)
 
 	int led_num = std::stoi(params[0]);
 
-	if((led_num < 0) || (led_num > Hardware::leds.size())){
+	if((led_num <= 0) || (led_num > Hardware::leds.size())){
 		throw std::runtime_error(excp_method("unsupported led_num. Try 1 or 2"));
 	}
 
@@ -57,12 +57,12 @@ void GPIOTest::process_buttons(const std::vector<std::string> &params)
 			[&pressed_cnt, i](){ 
 				++pressed_cnt[i + 3];
 				printf("Button %d long-press: %d\n", i + 1, pressed_cnt[i + 3]); 
-			},
-
-			[&pressed_cnt, i](){ 
-				++pressed_cnt[i + 6];
-				printf("Button %d double-press: %d\n", i + 1, pressed_cnt[i + 6]); 
 			}
+
+			// [&pressed_cnt, i](){ 
+			// 	++pressed_cnt[i + 6];
+			// 	printf("Button %d double-press: %d\n", i + 1, pressed_cnt[i + 6]); 
+			// }
 		);
 	}
 
