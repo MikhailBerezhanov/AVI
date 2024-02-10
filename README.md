@@ -8,28 +8,24 @@
 
 * для всех версий Windows
     * [MTsys google drive][mt-sys-win_driver]
-    * Socsys cloud:  http://dl.socsys.cloud/git/SIM7000_SIM7100_SIM7500_SIM7600_SIM7800%20Series%20Windows%20USB%20driver_V1.02.rar
+
 * для Linux
     * [MTsys google drive][mt-sys-linux_driver]
-    * Socsys cloud:  http://dl.socsys.cloud/git/SIM7500_SIM7600%20Linux%20NDIS_Driver_V2.01.zip
 
 Программа для обновления прошивки модуля:
 
 * SIM_QDL
     * [MTsys google drive][mt-sys-sim_qdl]
-    * Socsys cloud:  http://dl.socsys.cloud/git/SIM7080_SIM7500_SIM7600_SIM7900_SIM8200%20QDL%20V1.66%20Only%20for%20Update.rar
 
 Программа конфигурации и восстановления модуля:
 
 * SIM_QPST
     * [MTsys google drive][mt-sys-sim_qpst]
-    * Socsys cloud:  http://dl.socsys.cloud/git/qpst.win.2.7_installer_00491.1.zip
 
 Инструментарий для разработки приложений:
 
 * SIM_OPEN_SDK
     * [MTsys google drive][mt-sys-open_sdk]
-    * Socsys cloud:  http://dl.socsys.cloud/git/-Open%20Linux-20221011T132246Z-001.zip
 
 ## Подключение модуля к ПК
 
